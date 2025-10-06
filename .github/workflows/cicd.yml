@@ -11,8 +11,8 @@ env:
   ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
   EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
   K8S_NAMESPACE: default
-  K8S_DEPLOYMENT: spring-petclinic
-  K8S_CONTAINER: spring-petclinic
+  K8S_DEPLOYMENT: petclinic
+  K8S_CONTAINER: petclinic
 
 jobs:
   build-and-deploy:
@@ -29,19 +29,19 @@ jobs:
           java-version: '17'
 
       - name: Build with Maven
-        run: mvn -B -DskipTests package
+        run: mvn -B -DskipTests clean package
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and push Docker image
+      - name: Build and Push Docker Image
         uses: docker/build-push-action@v4
         with:
           context: .
@@ -54,19 +54,24 @@ jobs:
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
         with:
-          version: 'latest'
+          version: latest
 
       - name: Update kubeconfig for EKS
         run: |
           aws eks update-kubeconfig --name "${{ env.EKS_CLUSTER_NAME }}" --region "${{ env.AWS_REGION }}"
 
-      # ✅ This step ensures your manifests are applied before updating
-      - name: Apply Kubernetes manifests
+      - name: Deploy to EKS (create or update)
         run: |
+          echo "Applying Kubernetes manifests..."
           kubectl apply -f k8s/
 
-      - name: Deploy updated image to EKS
-        run: |
-          kubectl -n "${{ env.K8S_NAMESPACE }}" set image deployment/${{ env.K8S_DEPLOYMENT }} \
-            ${{ env.K8S_CONTAINER }}=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} --record
-          kubectl -n "${{ env.K8S_NAMESPACE }}" rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=180s
+          echo "Checking if deployment exists..."
+          if kubectl -n "${{ env.K8S_NAMESPACE }}" get deployment/${{ env.K8S_DEPLOYMENT }} >/dev/null 2>&1; then
+            echo "Deployment exists. Updating image..."
+            kubectl -n "${{ env.K8S_NAMESPACE }}" set image deployment/${{ env.K8S_DEPLOYMENT }} \
+              ${{ env.K8S_CONTAINER }}=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            kubectl -n "${{ env.K8S_NAMESPACE }}" rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=300s
+          else
+            echo "Deployment not found. Applied manifests should create it."
+            kubectl get deployments -n "${{ env.K8S_NAMESPACE }}"
+          fi
