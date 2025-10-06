@@ -66,7 +66,7 @@ class VetControllerTests {
 		helen.setId(2);
 		Specialty radiology = new Specialty();
 		radiology.setId(1);
-		radiology.setName("radiology");
+		radiology.setName("shobhitology");
 		helen.addSpecialty(radiology);
 		return helen;
 	}
